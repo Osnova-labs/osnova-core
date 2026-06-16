@@ -40,10 +40,35 @@ export interface Note {
   tags?: string[];
 }
 
+export interface NoteSummary extends Note {
+  relativePath: string;
+}
+
 export interface Asset {
   id: string;
   path: string;
   mediaType?: string;
+}
+
+export interface AssetSummary extends Asset {
+  name: string;
+  relativePath: string;
+  size: number;
+  updatedAt: string;
+}
+
+export interface ProjectOverview {
+  rootPath: string;
+  manifest?: OsnovaManifest;
+  validation: ValidationResult;
+  counts: {
+    notes: number;
+    assets: number;
+  };
+  recentNotes: NoteSummary[];
+  recentAssets: AssetSummary[];
+  notes: NoteSummary[];
+  assets: AssetSummary[];
 }
 
 export interface Card {
