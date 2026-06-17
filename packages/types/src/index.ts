@@ -44,6 +44,15 @@ export interface NoteSummary extends Note {
   relativePath: string;
 }
 
+export interface NoteContent {
+  summary: NoteSummary;
+  relativePath: string;
+  path: string;
+  content: string;
+  frontmatter?: string;
+  body: string;
+}
+
 export interface Asset {
   id: string;
   path: string;
@@ -55,6 +64,49 @@ export interface AssetSummary extends Asset {
   relativePath: string;
   size: number;
   updatedAt: string;
+}
+
+export type ProjectTreeScope = "notes" | "assets";
+
+export interface ProjectTreeNode {
+  id: string;
+  name: string;
+  kind: "directory" | "note" | "asset";
+  scope: ProjectTreeScope;
+  relativePath: string;
+  projectRelativePath: string;
+  path?: string;
+  children?: ProjectTreeNode[];
+  note?: NoteSummary;
+  asset?: AssetSummary;
+}
+
+export interface ProjectTree {
+  notes: ProjectTreeNode;
+  assets: ProjectTreeNode;
+}
+
+export interface CreateProjectFolderInput {
+  scope: ProjectTreeScope;
+  parentRelativePath?: string;
+  name: string;
+}
+
+export interface ImportAssetInput {
+  sourcePath: string;
+  targetFolderRelativePath?: string;
+}
+
+export interface ProjectLink {
+  id: string;
+  kind: "wiki" | "asset";
+  sourceNoteRelativePath: string;
+  rawTarget: string;
+  label?: string;
+  resolved: boolean;
+  targetRelativePath?: string;
+  note?: NoteSummary;
+  asset?: AssetSummary;
 }
 
 export interface ProjectOverview {
