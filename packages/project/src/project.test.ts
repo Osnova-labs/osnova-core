@@ -14,7 +14,8 @@ import {
   listProjectTree,
   openProject,
   readNote,
-  updateNote
+  updateNote,
+  updateNoteDocument
 } from "./index";
 
 const createdRoots: string[] = [];
@@ -44,7 +45,8 @@ describe("project operations", () => {
     const content = await readFile(note.path, "utf8");
 
     expect(note.id).toBe("first-note");
-    expect(content).toContain("# First Note");
+    expect(content).toContain("title: First Note");
+    expect(content).not.toContain("# First Note");
     expect(content).toContain("Body.");
   });
 
@@ -77,6 +79,61 @@ describe("project operations", () => {
 
     expect(updated.body).toContain("Published.");
     expect(raw).toContain("updatedAt:");
+  });
+
+  it("updates note document metadata and body without exposing frontmatter to the editor body", async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
+    createdRoots.push(rootPath);
+
+    const project = await createProject({ rootPath, id: "test-project", name: "Test Project" });
+    const note = await createNote(project, { title: "Old Title", body: "Body." });
+    const content = await readNote(rootPath, note.relativePath);
+    const updated = await updateNoteDocument(rootPath, note.relativePath, {
+      title: "New Title",
+      body: content.body.replace("Body.", "Updated body.")
+    });
+    const raw = await readFile(note.path, "utf8");
+
+    expect(updated.summary.title).toBe("New Title");
+    expect(updated.body).not.toContain("# New Title");
+    expect(updated.body).toContain("Updated body.");
+    expect(raw).toContain('title: "New Title"');
+  });
+
+  it("hides a duplicate first heading from legacy note bodies", async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
+    createdRoots.push(rootPath);
+
+    await createProject({ rootPath, id: "test-project", name: "Test Project" });
+    await writeFile(
+      path.join(rootPath, "notes", "legacy.md"),
+      [
+        "---",
+        "id: legacy",
+        "title: Legacy Note",
+        "createdAt: 2026-06-17T00:00:00.000Z",
+        "updatedAt: 2026-06-17T00:00:00.000Z",
+        "---",
+        "",
+        "# Legacy Note",
+        "",
+        "Body."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const content = await readNote(rootPath, "notes/legacy.md");
+    const updated = await updateNoteDocument(rootPath, "notes/legacy.md", {
+      title: "Renamed Note",
+      body: content.body
+    });
+    const raw = await readFile(path.join(rootPath, "notes", "legacy.md"), "utf8");
+
+    expect(content.body).toBe("Body.");
+    expect(updated.body).toBe("Body.");
+    expect(raw).not.toContain("# Legacy Note");
+    expect(raw).not.toContain("# Renamed Note");
+    expect(raw).toContain('title: "Renamed Note"');
   });
 
   it("returns a project overview for a valid project", async () => {
@@ -159,6 +216,35 @@ describe("project operations", () => {
     expect(tree.assets.children?.[0].children?.[0].projectRelativePath).toBe("assets/images/diagram.png");
   });
 
+  it("lists existing root markdown notes and files after adopting a folder", async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
+    createdRoots.push(rootPath);
+
+    await createProject({ rootPath, id: "test-project", name: "Test Project" });
+    await writeFile(path.join(rootPath, "Root Note.md"), "# Root Note\n\nBody.", "utf8");
+    await mkdir(path.join(rootPath, "Nested"), { recursive: true });
+    await writeFile(path.join(rootPath, "Nested", "Nested Note.md"), "# Nested Note\n\nBody.", "utf8");
+    await writeFile(path.join(rootPath, "Nested", "image.png"), "image", "utf8");
+
+    const [notes, assets, tree, rootNote] = await Promise.all([
+      listNotes(rootPath),
+      listAssets(rootPath),
+      listProjectTree(rootPath),
+      readNote(rootPath, "Root Note.md")
+    ]);
+
+    expect(notes.map((note) => note.relativePath).sort()).toEqual(["Nested/Nested Note.md", "Root Note.md"]);
+    expect(assets.map((asset) => asset.relativePath)).toEqual(["Nested/image.png"]);
+    expect(rootNote.summary.title).toBe("Root Note");
+    expect(rootNote.body).toBe("Body.");
+    expect(tree.notes.children?.find((node) => node.projectRelativePath === "Root Note.md")?.kind).toBe("note");
+    expect(
+      tree.assets.children
+        ?.find((node) => node.name === "Nested")
+        ?.children?.find((node) => node.projectRelativePath === "Nested/image.png")?.kind
+    ).toBe("asset");
+  });
+
   it("lists resolved and unresolved project links", async () => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
     createdRoots.push(rootPath);
@@ -176,6 +262,24 @@ describe("project operations", () => {
     expect(links.find((link) => link.rawTarget === "Target Note")?.resolved).toBe(true);
     expect(links.find((link) => link.rawTarget === "Missing Note")?.resolved).toBe(false);
     expect(links.find((link) => link.rawTarget === "assets/diagram.png")?.resolved).toBe(true);
+  });
+
+  it("does not fail project links on traversal-like existing vault links", async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
+    createdRoots.push(rootPath);
+
+    const project = await createProject({ rootPath, id: "test-project", name: "Test Project" });
+    await writeFile(path.join(rootPath, "Root Target.md"), "# Root Target\n\nBody.", "utf8");
+    await createNote(project, {
+      title: "Source Note",
+      body: "[[Root Target]]\n[[../Outside]]\n[bad](assets/../secret.png)"
+    });
+
+    const links = await listProjectLinks(rootPath);
+
+    expect(links.find((link) => link.rawTarget === "Root Target")?.resolved).toBe(true);
+    expect(links.find((link) => link.rawTarget === "../Outside")?.resolved).toBe(false);
+    expect(links.find((link) => link.rawTarget === "assets/../secret.png")?.resolved).toBe(false);
   });
 
   it("returns validation issues for an incomplete project", async () => {

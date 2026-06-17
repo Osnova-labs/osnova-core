@@ -53,6 +53,11 @@ export interface NoteContent {
   body: string;
 }
 
+export interface UpdateNoteDocumentInput {
+  title?: string;
+  body?: string;
+}
+
 export interface Asset {
   id: string;
   path: string;
@@ -95,6 +100,16 @@ export interface CreateProjectFolderInput {
 export interface ImportAssetInput {
   sourcePath: string;
   targetFolderRelativePath?: string;
+}
+
+export interface MoveNoteInput {
+  sourceRelativePath: string;
+  targetFolderRelativePath: string;
+}
+
+export interface MoveAssetInput {
+  sourceRelativePath: string;
+  targetFolderRelativePath: string;
 }
 
 export interface ProjectLink {
