@@ -1,4 +1,4 @@
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import type {
   CreateProjectFolderInput,
@@ -7,7 +7,8 @@ import type {
   OsnovaProject,
   ProjectTree,
   ProjectTreeNode,
-  ProjectTreeScope
+  ProjectTreeScope,
+  MoveFolderInput
 } from "@osnova/types";
 import {
   joinScopeRelativePath,
@@ -20,7 +21,7 @@ import {
 import { isNodeError } from "./errors";
 import { listNotes } from "./note";
 import { listAssets } from "./asset";
-import { isReservedProjectPath } from "./project-files";
+import { isHiddenEntryName, isReservedProjectPath } from "./project-files";
 
 export async function createProjectFolder(project: OsnovaProject, input: CreateProjectFolderInput): Promise<ProjectTreeNode> {
   const parentRelativePath = input.parentRelativePath ? normalizeScopeRelativePath(input.parentRelativePath) : "";
@@ -40,6 +41,43 @@ export async function createProjectFolder(project: OsnovaProject, input: CreateP
     path: folderPath,
     children: []
   };
+}
+
+export async function moveProjectFolder(project: OsnovaProject, input: MoveFolderInput): Promise<void> {
+  const sourceRelativePath = normalizeScopeRelativePath(input.sourceRelativePath);
+  const targetFolderRelativePath = normalizeScopeRelativePath(input.targetFolderRelativePath);
+  const folderName = path.posix.basename(sourceRelativePath);
+
+  if (!folderName || sourceRelativePath === targetFolderRelativePath) {
+    return;
+  }
+
+  if (targetFolderRelativePath === sourceRelativePath ||
+      targetFolderRelativePath.startsWith(`${sourceRelativePath}/`)) {
+    throw new Error("Cannot move folder into itself or a subfolder.");
+  }
+
+  for (const scope of ["notes", "assets"] as const) {
+    const sourcePath = resolveScopedPath(project.rootPath, scope, sourceRelativePath);
+
+    let sourceExists = false;
+    try {
+      const sourceStat = await stat(sourcePath);
+      sourceExists = sourceStat.isDirectory();
+    } catch {
+      sourceExists = false;
+    }
+
+    if (!sourceExists) {
+      continue;
+    }
+
+    const targetFolderPath = resolveScopedPath(project.rootPath, scope, targetFolderRelativePath);
+    const targetPath = path.join(targetFolderPath, folderName);
+
+    await mkdir(targetFolderPath, { recursive: true });
+    await rename(sourcePath, targetPath);
+  }
 }
 
 export async function listProjectTree(rootPath: string): Promise<ProjectTree> {
@@ -102,6 +140,10 @@ async function readTreeChildren(
     });
     const nodes: Array<ProjectTreeNode | null> = await Promise.all(
       sortedEntries.map(async (entry): Promise<ProjectTreeNode | null> => {
+        if (isHiddenEntryName(entry.name)) {
+          return null;
+        }
+
         const childRelativePath = joinScopeRelativePath(relativePath, entry.name);
         const projectRelativePath = toProjectPath(scope, childRelativePath);
 
@@ -178,6 +220,10 @@ async function readLooseTreeChildren(
     });
     const nodes: Array<ProjectTreeNode | null> = await Promise.all(
       sortedEntries.map(async (entry): Promise<ProjectTreeNode | null> => {
+        if (isHiddenEntryName(entry.name)) {
+          return null;
+        }
+
         const childRelativePath = joinScopeRelativePath(relativePath, entry.name);
         const childPath = resolveProjectPath(rootPath, childRelativePath);
 

@@ -12,6 +12,7 @@ import {
   listNotes,
   listProjectLinks,
   listProjectTree,
+  moveProjectFolder,
   openProject,
   readNote,
   updateNote,
@@ -245,6 +246,32 @@ describe("project operations", () => {
     ).toBe("asset");
   });
 
+  it("hides dotfiles and dot directories from notes, assets and tree", async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
+    createdRoots.push(rootPath);
+
+    const project = await createProject({ rootPath, id: "test-project", name: "Test Project" });
+    await mkdir(path.join(rootPath, ".obsidian"), { recursive: true });
+    await writeFile(path.join(rootPath, ".obsidian", "workspace.json"), "{}", "utf8");
+    await writeFile(path.join(rootPath, ".obsidian", "hidden.md"), "# Hidden\n\nBody.", "utf8");
+    await writeFile(path.join(rootPath, ".DS_Store"), "store", "utf8");
+    await mkdir(path.join(rootPath, "notes", ".drafts"), { recursive: true });
+    await writeFile(path.join(rootPath, "notes", ".drafts", "draft.md"), "# Draft\n\nBody.", "utf8");
+    await createNote(project, { title: "Visible Note", body: "Body." });
+
+    const [notes, assets, tree] = await Promise.all([
+      listNotes(rootPath),
+      listAssets(rootPath),
+      listProjectTree(rootPath)
+    ]);
+
+    expect(notes.map((note) => note.relativePath)).toEqual(["notes/visible-note.md"]);
+    expect(assets.map((asset) => asset.name)).not.toContain(".DS_Store");
+    expect(assets.find((asset) => asset.relativePath.includes(".obsidian"))).toBeUndefined();
+    expect(tree.notes.children?.find((node) => node.name === ".drafts")).toBeUndefined();
+    expect(tree.assets.children?.find((node) => node.name === ".obsidian")).toBeUndefined();
+  });
+
   it("lists resolved and unresolved project links", async () => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
     createdRoots.push(rootPath);
@@ -280,6 +307,32 @@ describe("project operations", () => {
     expect(links.find((link) => link.rawTarget === "Root Target")?.resolved).toBe(true);
     expect(links.find((link) => link.rawTarget === "../Outside")?.resolved).toBe(false);
     expect(links.find((link) => link.rawTarget === "assets/../secret.png")?.resolved).toBe(false);
+  });
+
+  it("moves project folders across scopes and rejects moving into itself", async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), "osnova-core-"));
+    createdRoots.push(rootPath);
+
+    const project = await createProject({ rootPath, id: "test-project", name: "Test Project" });
+    await createProjectFolder(project, { scope: "notes", name: "Lectures" });
+    await createNote(project, { title: "L1", body: "Body.", folderRelativePath: "Lectures" });
+    await createProjectFolder(project, { scope: "notes", name: "Archive" });
+    await mkdir(path.join(rootPath, "assets", "Lectures"), { recursive: true });
+    await writeFile(path.join(rootPath, "assets", "Lectures", "diagram.png"), "image", "utf8");
+
+    await moveProjectFolder(project, { sourceRelativePath: "Lectures", targetFolderRelativePath: "Archive" });
+
+    const tree = await listProjectTree(rootPath);
+    const archiveDir = tree.notes.children?.find((n) => n.name === "Archive");
+    expect(archiveDir?.children?.find((n) => n.name === "Lectures")).toBeTruthy();
+    expect(archiveDir?.children?.find((n) => n.name === "Lectures")?.children?.[0].name).toBe("L1");
+
+    const assetsArchive = tree.assets.children?.find((n) => n.name === "Archive");
+    expect(assetsArchive?.children?.find((n) => n.name === "Lectures")).toBeTruthy();
+
+    await expect(
+      moveProjectFolder(project, { sourceRelativePath: "Archive", targetFolderRelativePath: "Archive/Lectures" })
+    ).rejects.toThrow("Cannot move folder into itself");
   });
 
   it("returns validation issues for an incomplete project", async () => {

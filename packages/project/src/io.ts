@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { isNodeError } from "./errors";
+import { isHiddenEntryName } from "./project-files";
 
 export async function listFiles(
   rootPath: string,
@@ -11,6 +12,10 @@ export async function listFiles(
     const entries = await readdir(rootPath, { withFileTypes: true });
     const nested = await Promise.all(
       entries.map(async (entry) => {
+        if (isHiddenEntryName(entry.name)) {
+          return [];
+        }
+
         const entryPath = path.join(rootPath, entry.name);
         if (entry.isDirectory()) {
           if (options.skipDirectory?.(entryPath)) {

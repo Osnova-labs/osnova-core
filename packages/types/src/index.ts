@@ -112,6 +112,11 @@ export interface MoveAssetInput {
   targetFolderRelativePath: string;
 }
 
+export interface MoveFolderInput {
+  sourceRelativePath: string;
+  targetFolderRelativePath: string;
+}
+
 export interface ProjectLink {
   id: string;
   kind: "wiki" | "asset";

@@ -7,3 +7,7 @@ export function isReservedProjectPath(rootPath: string, filePath: string): boole
 
   return RESERVED_PROJECT_ENTRIES.has(firstSegment);
 }
+
+export function isHiddenEntryName(name: string): boolean {
+  return name.startsWith(".");
+}
